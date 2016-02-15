@@ -10,6 +10,16 @@ int rtc[7];
 
 #define PIN 6
 
+enum PaletteColour { HOUR2, HOUR1, MINUTE1, QUARTER_TICK, FIVE_MINUTE_TICK, HOUR, MINUTE, SECOND};
+
+uint32_t palette0[] = {0x000010,0x000020,0x002000,0x808080,0x202020,0x000080,0x008000,0x800000};
+
+uint32_t* palettes[]={
+  &palette0[0]
+};
+
+int currentPalette = 0;
+
 // Parameter 1 = number of pixels in strip
 // Parameter 2 = Arduino pin number (most are valid)
 // Parameter 3 = pixel type flags, add together as needed:
@@ -48,28 +58,31 @@ void loop() {
   int minutes = rtc[1];
   int seconds = rtc[0];
   int hoursPixel = hours * 5 + minutes/12;
+  
+  uint32_t* p = palettes[currentPalette];
+  
   strip.clear();
-  strip.setPixelColor(mod60(hoursPixel-2), 0, 0, 16); // hours in blue
-  strip.setPixelColor(mod60(hoursPixel-1), 0, 0, 32); // hours in blue
-  strip.setPixelColor(mod60(hoursPixel+1), 0, 0, 32); // hours in blue
-  strip.setPixelColor(mod60(hoursPixel+2), 0, 0, 16); // hours in blue
-  strip.setPixelColor(mod60(minutes-1), 0, 32, 0); // minutes in green
-  strip.setPixelColor(mod60(minutes+1), 0, 32, 0); // minutes in green
-  strip.setPixelColor(0, 127, 127, 127);
-  strip.setPixelColor(5, 32, 32, 32);
-  strip.setPixelColor(10, 32, 32, 32);
-  strip.setPixelColor(15, 127, 127, 127);
-  strip.setPixelColor(20, 32, 32, 32);
-  strip.setPixelColor(25, 32, 32, 32);
-  strip.setPixelColor(30, 127, 127, 127);
-  strip.setPixelColor(35, 32, 32, 32);
-  strip.setPixelColor(40, 32, 32, 32);
-  strip.setPixelColor(45, 127, 127, 127);
-  strip.setPixelColor(50, 32, 32, 32);
-  strip.setPixelColor(55, 32, 32, 32);
-  strip.setPixelColor(hoursPixel, 0, 0, 127); // hours in blue
-  strip.setPixelColor(minutes, 0, 127, 0); // minutes in green
-  strip.setPixelColor(seconds, 127, 0, 0); // seconds in red
+  strip.setPixelColor(mod60(hoursPixel-2), p[HOUR2]); // hours in blue
+  strip.setPixelColor(mod60(hoursPixel-1), p[HOUR1]); // hours in blue
+  strip.setPixelColor(mod60(hoursPixel+1), p[HOUR1]); // hours in blue
+  strip.setPixelColor(mod60(hoursPixel+2), p[HOUR2]); // hours in blue
+  strip.setPixelColor(mod60(minutes-1), p[MINUTE1]); // minutes in green
+  strip.setPixelColor(mod60(minutes+1), p[MINUTE1]); // minutes in green
+  strip.setPixelColor(0, p[QUARTER_TICK]);
+  strip.setPixelColor(5, p[FIVE_MINUTE_TICK]);
+  strip.setPixelColor(10, p[FIVE_MINUTE_TICK]);
+  strip.setPixelColor(15, p[QUARTER_TICK]);
+  strip.setPixelColor(20, p[FIVE_MINUTE_TICK]);
+  strip.setPixelColor(25, p[FIVE_MINUTE_TICK]);
+  strip.setPixelColor(30, p[QUARTER_TICK]);
+  strip.setPixelColor(35, p[FIVE_MINUTE_TICK]);
+  strip.setPixelColor(40, p[FIVE_MINUTE_TICK]);
+  strip.setPixelColor(45, p[QUARTER_TICK]);
+  strip.setPixelColor(50, p[FIVE_MINUTE_TICK]);
+  strip.setPixelColor(55, p[FIVE_MINUTE_TICK]);
+  strip.setPixelColor(hoursPixel, p[HOUR]);
+  strip.setPixelColor(minutes, p[MINUTE]);
+  strip.setPixelColor(seconds, p[SECOND]);
   strip.show();
   delay(100);
 }
