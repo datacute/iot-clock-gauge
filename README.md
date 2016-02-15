@@ -36,3 +36,37 @@ room, even without an internet connection.
 The above [project idea](https://www.hackster.io/challenges/arduino-microsoft-maker/ideas/1045)
 was submitted to the "[World’s Largest Arduino Maker Challenge](https://www.hackster.io/challenges/arduino-microsoft-maker)"
 on [hackster.io](https://www.hackster.io/)
+
+Unfortunately the project wasn't one of the Phase 1 winners.
+
+With no MKR1000, this project had to switch to targetting another
+platform, using devices Stephen already has (Arduino UNO, DS1307
+RTC, Wemos D1 mini, Sparkfun ESP8266 Thing).
+
+The UNO, DS1307 RTC and LEDs were assembled into a working clock within
+a couple of evenings, but the inability to configure or extend it needed
+to be solved.
+
+Three options were considered:
+1. Use an ESP8266 as a wifi shield for the UNO
+   - Need a level shifter to communcate with 3.3V ESP8266
+   - Takes up more space
+   - UNO will probably run out of RAM
+2. Using a UNO to control the clock and act as an I2C slave, with the
+   ESP8266 as a web & MQTT configurable controller.
+   - Need a level shifter to communcate via I2C with 5V UNO and RTC
+   - Takes up more space
+   - More complicated communications
+3. Doing everything on an ESP8266.
+   - No longer meets the requirements of the Arduino Maker Challenge
+   - Need a level shifter to communicate with the LEDs
+   - Need another different level shifter to communcate with 5V I2C RTC
+      - Or a 3.3V RTC
+      - Or (last resort/temporary measure) use ntp instead of an RTC
+
+The decision was made to go with option 3.
+   - 3.3V RTC ordered (DS3231 board)
+   - LED signal level shifter ordered again (SN74AHCT125N)
+
+Until these orders arrive, a DS1302 has been borrowed, the Arduino sketch
+adjusted slightly, and the LEDs are ticking away, being powered at 3.3V
