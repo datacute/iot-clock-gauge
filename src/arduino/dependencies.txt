@@ -1,0 +1,18 @@
+My initial hardware consists of a mixture of components I already had, and components purchased for this project:
+
+Arduino UNO
+DS1307 RTC (on DFRobot board v1.1)
+4 x 1/4 circle of 15 x WS2812 5050 RGB LEDs
+1000 µF 50V capacitor
+5V 5amp power supply
+breadboard
+wires
+
+RTC
+http://www.dfrobot.com/wiki/index.php/Real_Time_Clock_Module_(DS1307)_V1.1_(SKU:DFR0151)
+The RTC in this is an DS1307, and the library I'm using initially is the one mentioned on that page.
+http://www.dfrobot.com/image/data/DFR0151/V1.1/Arduino%20library.zip
+I'll probably end up changing to a library that supports unix time, to make it easier to swap the RTC.
+
+WS2812 RGB LEDs
+The library I am using to communicate with the RGB LEDs is the Adafruit NeoPixel library v1.0.4.
