@@ -1,4 +1,4 @@
-﻿#include <DS1302RTC.h>
+#include <DS1302RTC.h>
 #include <Time.h>
 #include <TimeLib.h>
 
