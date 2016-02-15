@@ -1,12 +1,16 @@
-﻿#include <DS1307RTC.h>
+﻿#include <DS1302RTC.h>
 #include <Time.h>
+#include <TimeLib.h>
+
 #include <Wire.h>
 #include <Adafruit_NeoPixel.h>
 #ifdef __AVR__
   #include <avr/power.h>
 #endif
 
-#define PIN 6
+#define PIN D4
+
+DS1302RTC RTC(D3, D2, D1);
 
 enum PaletteColour { QUARTER_TICK, FIVE_MINUTE_TICK, HOUR, HOUR1, HOUR2, MINUTE, MINUTE1, SECOND};
 
@@ -34,8 +38,6 @@ Adafruit_NeoPixel strip = Adafruit_NeoPixel(60, PIN, NEO_GRB + NEO_KHZ800);
 // on a live circuit...if you must, connect GND first.
 
 void setup() {
-  DDRC |= _BV(2) | _BV(3); // POWER:Vcc Gnd
-  PORTC |= _BV(3); // VCC PINC3
   // This is for Trinket 5V 16MHz, you can remove these three lines if you are not using a Trinket
   #if defined (__AVR_ATtiny85__)
     if (F_CPU == 16000000) clock_prescale_set(clock_div_1);
@@ -44,13 +46,13 @@ void setup() {
 
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
-  strip.setBrightness(16);
+  strip.setBrightness(32);
 }
 
 void loop() {
   tmElements_t tm;
   //get current time
-  if (RTC.read(tm)) {
+  if (RTC.read(tm) == 0) {
     int hours = tm.Hour;
     while (hours >= 12) hours -= 12;
     int minutes = tm.Minute;
