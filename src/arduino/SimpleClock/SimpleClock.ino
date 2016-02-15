@@ -1,18 +1,16 @@
-﻿#include <Wire.h>
-#include <DS1307.h>
+﻿#include <DS1307RTC.h>
+#include <Time.h>
+#include <Wire.h>
 #include <Adafruit_NeoPixel.h>
 #ifdef __AVR__
   #include <avr/power.h>
 #endif
 
-//store the current time data
-int rtc[7];
-
 #define PIN 6
 
-enum PaletteColour { HOUR2, HOUR1, MINUTE1, QUARTER_TICK, FIVE_MINUTE_TICK, HOUR, MINUTE, SECOND};
+enum PaletteColour { QUARTER_TICK, FIVE_MINUTE_TICK, HOUR, HOUR1, HOUR2, MINUTE, MINUTE1, SECOND};
 
-uint32_t palette0[] = {0x000010,0x000020,0x002000,0x808080,0x202020,0x000080,0x008000,0x800000};
+uint32_t palette0[] = {0x808080,0x202020,0x800000,0x200000,0x100000,0x008000,0x002000,0x000080};
 
 uint32_t* palettes[]={
   &palette0[0]
@@ -50,40 +48,41 @@ void setup() {
 }
 
 void loop() {
-  uint16_t i;
+  tmElements_t tm;
   //get current time
-  RTC.get(rtc, true);
-  int hours = rtc[2];
-  if (hours >= 12) hours -= 12;
-  int minutes = rtc[1];
-  int seconds = rtc[0];
-  int hoursPixel = hours * 5 + minutes/12;
-  
-  uint32_t* p = palettes[currentPalette];
-  
-  strip.clear();
-  strip.setPixelColor(mod60(hoursPixel-2), p[HOUR2]); // hours in blue
-  strip.setPixelColor(mod60(hoursPixel-1), p[HOUR1]); // hours in blue
-  strip.setPixelColor(mod60(hoursPixel+1), p[HOUR1]); // hours in blue
-  strip.setPixelColor(mod60(hoursPixel+2), p[HOUR2]); // hours in blue
-  strip.setPixelColor(mod60(minutes-1), p[MINUTE1]); // minutes in green
-  strip.setPixelColor(mod60(minutes+1), p[MINUTE1]); // minutes in green
-  strip.setPixelColor(0, p[QUARTER_TICK]);
-  strip.setPixelColor(5, p[FIVE_MINUTE_TICK]);
-  strip.setPixelColor(10, p[FIVE_MINUTE_TICK]);
-  strip.setPixelColor(15, p[QUARTER_TICK]);
-  strip.setPixelColor(20, p[FIVE_MINUTE_TICK]);
-  strip.setPixelColor(25, p[FIVE_MINUTE_TICK]);
-  strip.setPixelColor(30, p[QUARTER_TICK]);
-  strip.setPixelColor(35, p[FIVE_MINUTE_TICK]);
-  strip.setPixelColor(40, p[FIVE_MINUTE_TICK]);
-  strip.setPixelColor(45, p[QUARTER_TICK]);
-  strip.setPixelColor(50, p[FIVE_MINUTE_TICK]);
-  strip.setPixelColor(55, p[FIVE_MINUTE_TICK]);
-  strip.setPixelColor(hoursPixel, p[HOUR]);
-  strip.setPixelColor(minutes, p[MINUTE]);
-  strip.setPixelColor(seconds, p[SECOND]);
-  strip.show();
+  if (RTC.read(tm)) {
+    int hours = tm.Hour;
+    while (hours >= 12) hours -= 12;
+    int minutes = tm.Minute;
+    int seconds = tm.Second;
+    int hoursPixel = hours * 5 + minutes/12;
+    
+    uint32_t* p = palettes[currentPalette];
+    
+    strip.clear();
+    strip.setPixelColor(mod60(hoursPixel-2), p[HOUR2]); // hours in blue
+    strip.setPixelColor(mod60(hoursPixel-1), p[HOUR1]); // hours in blue
+    strip.setPixelColor(mod60(hoursPixel+1), p[HOUR1]); // hours in blue
+    strip.setPixelColor(mod60(hoursPixel+2), p[HOUR2]); // hours in blue
+    strip.setPixelColor(mod60(minutes-1), p[MINUTE1]); // minutes in green
+    strip.setPixelColor(mod60(minutes+1), p[MINUTE1]); // minutes in green
+    strip.setPixelColor(0, p[QUARTER_TICK]);
+    strip.setPixelColor(5, p[FIVE_MINUTE_TICK]);
+    strip.setPixelColor(10, p[FIVE_MINUTE_TICK]);
+    strip.setPixelColor(15, p[QUARTER_TICK]);
+    strip.setPixelColor(20, p[FIVE_MINUTE_TICK]);
+    strip.setPixelColor(25, p[FIVE_MINUTE_TICK]);
+    strip.setPixelColor(30, p[QUARTER_TICK]);
+    strip.setPixelColor(35, p[FIVE_MINUTE_TICK]);
+    strip.setPixelColor(40, p[FIVE_MINUTE_TICK]);
+    strip.setPixelColor(45, p[QUARTER_TICK]);
+    strip.setPixelColor(50, p[FIVE_MINUTE_TICK]);
+    strip.setPixelColor(55, p[FIVE_MINUTE_TICK]);
+    strip.setPixelColor(hoursPixel, p[HOUR]);
+    strip.setPixelColor(minutes, p[MINUTE]);
+    strip.setPixelColor(seconds, p[SECOND]);
+    strip.show();
+  }
   delay(100);
 }
 
