@@ -1,8 +1,8 @@
-#include <DS1302RTC.h>
-#include <Time.h>
-#include <TimeLib.h>
-
 #include <Wire.h>
+#include <DS3232RTC.h>    //http://github.com/JChristensen/DS3232RTC
+#include <Time.h>         //https://github.com/PaulStoffregen/Time
+#include <TimeLib.h>      //https://github.com/PaulStoffregen/Time
+
 #include <Adafruit_NeoPixel.h>
 #ifdef __AVR__
   #include <avr/power.h>
@@ -47,8 +47,6 @@ uint8_t mod60(int8_t v);
 void sendNTPpacket(IPAddress &address);
 
 #define PIN D5
-
-DS1302RTC RTC(D3, D2, D1);
 
 enum PaletteColour { QUARTER_TICK, FIVE_MINUTE_TICK, HOUR, HOUR1, HOUR2, MINUTE, MINUTE1, SECOND};
 
