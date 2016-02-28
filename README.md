@@ -66,8 +66,8 @@ Three options were considered:
     - Or (last resort/temporary measure) use ntp instead of an RTC
 
 The decision was made to go with option 3.
-- 3.3V RTC ordered (DS3231 board)
+- 3.3V RTC ordered and received (DS3231 board)
 - LED signal level shifter ordered again (SN74AHCT125N)
 
-Until these orders arrive, a DS1302 has been borrowed, the Arduino sketch
-adjusted slightly, and the LEDs are ticking away, being powered at 3.3V
+Until the level shifters arrive, the LEDs are ticking away at a reduced
+brightness, due to being powered at 3.3V
