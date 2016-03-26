@@ -8,7 +8,7 @@
   #include <avr/power.h>
 #endif
 
-#include <ESP8266WiFi.h>
+#include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 #include <WiFiUdp.h>
 #include <PubSubClient.h>
 
@@ -18,9 +18,9 @@ const char* password = "your network password";       // your network password
 const char* logTopic = "home/clock/log";
 const char* subscribeTopic = "home/clock/incoming"; // subscribe to this topic; anything sent here will be passed into the messageReceived function
 IPAddress mqtt_server(192,168,0,1); // your MQTT Server
-String clientName = "clock-"; // just a name used to talk to MQTT broker
+String mqttClientName = "clock-"; // just a name used to talk to MQTT broker
 WiFiClient wifiClient;
-PubSubClient client(wifiClient);
+PubSubClient mqttClient(wifiClient);
 
 long lastMsg = 0;
 char msg[50];
@@ -46,17 +46,20 @@ void digitalClockDisplay();
 uint8_t mod60(int8_t v);
 void sendNTPpacket(IPAddress &address);
 
-#define PIN D5
+#define PIN_BRIGHTNESS_BUTTON D8
+#define PIN_NEOPIXEL_RING D5
 
 enum PaletteColour { QUARTER_TICK, FIVE_MINUTE_TICK, HOUR, HOUR1, HOUR2, MINUTE, MINUTE1, SECOND};
 
-uint32_t palette0[] = {0x808080,0x202020,0x800000,0x200000,0x100000,0x008000,0x002000,0x000080};
+uint32_t palette0[] = {0xFFFFFF,0x404040,0xFF0000,0x400000,0x200000,0x00FF00,0x004000,0x0000FF};
 
 uint32_t* palettes[]={
   &palette0[0]
 };
 
 int currentPalette = 0;
+
+int brightness = 16;
 
 // Parameter 1 = number of pixels in strip
 // Parameter 2 = Arduino pin number (most are valid)
@@ -66,33 +69,18 @@ int currentPalette = 0;
 //   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
 //   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
 //   NEO_RGBW    Pixels are wired for RGBW bitstream (NeoPixel RGBW products)
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(60, PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(60, PIN_NEOPIXEL_RING, NEO_GRB + NEO_KHZ800);
 
 // IMPORTANT: To reduce NeoPixel burnout risk, add 1000 uF capacitor across
 // pixel power leads, add 300 - 500 Ohm resistor on first pixel's data input
 // and minimize distance between Arduino and first pixel.  Avoid connecting
 // on a live circuit...if you must, connect GND first.
 
-void setup_wifi() {
-
-  delay(10);
-  // We start by connecting to a WiFi network
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-
-  WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-}
+time_t prevDisplay = 0; // when the digital clock was displayed
+unsigned long timemslast;
+int speedy = 0;
+bool enableSpeedy = false;
+bool displaySpeedy = false;
 
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
@@ -111,12 +99,73 @@ void callback(char* topic, byte* payload, unsigned int length) {
   } else if ((char)payload[0] == '0') {
     digitalWrite(BUILTIN_LED, HIGH);  // Turn the LED off by making the voltage HIGH
   } else if ((char)payload[0] == 'B') {
-    strip.setBrightness(1<<(payload[1]-'0'));
+    brightness = 1<<(payload[1]-'0');
+    strip.setBrightness(brightness);
     digitalClockDisplay();
+    mqttClient.publish(logTopic, "Brightness Set");
   } else if ((char)payload[0] == 'N') {
+    mqttClient.publish(logTopic, "Synchronizing");
     time_t t = getNtpTime();
     RTC.set(t);
     setTime(t);
+    mqttClient.publish(logTopic, "Synchronized");
+  } else if ((char)payload[0] == 'S') {
+    if (enableSpeedy)
+    {
+      enableSpeedy = false;
+      mqttClient.publish(logTopic, "Second sweep disabled");
+    } else {
+      enableSpeedy = true;
+      mqttClient.publish(logTopic, "Second sweep enabled");
+    }
+  }
+}
+
+// Wifi state management
+enum wifiState {
+  wifiOff, wifiBegun, wifiConnected
+};
+wifiState wifiCurrentState = wifiOff;
+
+void wifiBegin() {
+  wifiCurrentState = wifiBegun;
+  // We start by connecting to a WiFi network
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+}
+
+void wifiWaitForConnection() {
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiCurrentState = wifiConnected;
+    Serial.println("WiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+
+    // Get ready for NTP
+    Udp.begin(localPort);
+    //time_t t = getNtpTime();
+    //RTC.set(t);
+    //setTime(t);
+  
+    // Get ready for MQTT
+    mqttClient.setServer(mqtt_server, 1883);
+    mqttClient.setCallback(callback);
+  }
+}
+
+void wifiMaintainConnection() {
+  if (WiFi.status() != WL_CONNECTED) {
+    wifiBegin();
+  }
+}
+
+void wifiStateManagement() {
+  switch (wifiCurrentState) {
+    case wifiOff: wifiBegin(); break;
+    case wifiBegun: wifiWaitForConnection(); break;
+    default: wifiMaintainConnection();
   }
 }
 
@@ -131,37 +180,116 @@ String macToStr(const uint8_t* mac)
   return result;
 }
 
-void reconnect() {
-  // Generate client name based on MAC address and last 8 bits of microsecond counter
-  uint8_t mac[6];
-  WiFi.macAddress(mac);
-  clientName += macToStr(mac);
-  clientName += "-";
-  clientName += String(micros() & 0xff, 16);
+int mqttState = 0;
 
-  // Loop until we're reconnected
-  while (!client.connected()) {
-    Serial.print("Attempting MQTT connection to ");
-    Serial.print(mqtt_server);
-    Serial.print(" as ");
-    Serial.println(clientName);
-    // Attempt to connect
-    if (client.connect((char*) clientName.c_str())) {
-      Serial.println("connected");
-      // Once connected, publish an announcement...
-      client.publish(logTopic, clientName.c_str());
-      // ... and resubscribe
-      client.subscribe(subscribeTopic);
-      Serial.print("Subscribed to: ");
-      Serial.println(subscribeTopic);
-    } else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
-      delay(5000);
+void mqttConnect() {
+  Serial.print("Attempting MQTT connection to ");
+  Serial.print(mqtt_server);
+  Serial.print(" as ");
+  Serial.println(mqttClientName);
+  // this is still blocking, when a solution is found, mqttState of 1 will mean connecting.
+  if (mqttClient.connect((char*) mqttClientName.c_str())) {
+    Serial.println("connected");
+    // Once connected, publish an announcement...
+    mqttClient.publish(logTopic, mqttClientName.c_str());
+    // ... and resubscribe
+    mqttClient.subscribe(subscribeTopic);
+    Serial.print("Subscribed to: ");
+    Serial.println(subscribeTopic);
+    mqttState = 2;
+  } else {
+    Serial.print("failed, rc=");
+    Serial.print(mqttClient.state());
+    Serial.println(" reset to try again");
+    mqttState = 3;
+  }
+}
+
+void mqttStateManagement() {
+  if (mqttState == 0) {
+    // Generate client name based on MAC address and last 8 bits of microsecond counter
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    mqttClientName += macToStr(mac);
+    mqttClientName += "-";
+    mqttClientName += String(micros() & 0xff, 16);
+    mqttConnect();
+  } else if (mqttClient.connected()) {
+    mqttState = 2;
+  } else {
+    // mqtt connection attempts are blocking, so if it fails, don't try again.
+    // reset to try again.
+  }
+}
+
+void runClockLoop() {
+  if (timeStatus() != timeNotSet) {
+    bool displayClock=false;
+    unsigned long timemsnow = millis();
+    time_t currentTime = now();
+
+    if (timemslast < timemsnow - 15) {
+      timemslast = timemsnow;
+      speedy=mod60(speedy+1);
+      displayClock=true;
+    }
+
+    if (currentTime != prevDisplay) {
+      displayClock=true;
+      timemslast = timemsnow;
+      speedy=0;
+      displaySpeedy = prevDisplay > 0;
+      prevDisplay = currentTime;
+    }
+
+    if (displayClock) {
+      digitalClockDisplay();
     }
   }
+}
+
+void runMqttLoop() {
+  if (wifiCurrentState == wifiConnected) {
+    mqttStateManagement();
+    if (mqttState == 2) {
+      mqttClient.loop();
+    }
+  }
+}
+
+int lastButtonState = 0;
+int brightnessIncreasing = 0;
+
+void toggleBrightnessWithButton() {
+  int buttonState = digitalRead(PIN_BRIGHTNESS_BUTTON);
+  if (buttonState != lastButtonState)
+  {
+    lastButtonState = buttonState;
+    if (buttonState == 1)
+    {
+      if (brightnessIncreasing)
+      {
+        if (brightness == 0) {
+          brightness = 1;
+        } else if (brightness == 128) {
+          brightness = 255;
+        } else if (brightness == 255) {
+          brightness = 128;
+          brightnessIncreasing = 0;
+        } else {
+          brightness = brightness << 1;
+        }
+      } else {
+        brightness = brightness >> 1;
+        if (brightness == 0) {
+          brightnessIncreasing = 1;
+        }
+      }
+      Serial.println(brightness);
+      strip.setBrightness(brightness);
+      digitalClockDisplay();
+    }
+  }  
 }
 
 void setup() {
@@ -173,45 +301,30 @@ void setup() {
 
   pinMode(BUILTIN_LED, OUTPUT);     // Initialize the BUILTIN_LED pin as an output
   digitalWrite(BUILTIN_LED, HIGH);  // Turn the LED off by making the voltage HIGH
+
+  pinMode(PIN_BRIGHTNESS_BUTTON, INPUT);
+
   Serial.begin(115200);
 
+  Serial.println("Setting Up RTC");
+  setSyncProvider(RTC.get);
+  if(timeStatus() != timeSet) 
+    Serial.println("Unable to sync with the RTC");
+  else
+    Serial.println("RTC has set the system time");      
+
+  Serial.println("Turning on Clock LEDs");
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
-  strip.setBrightness(32);
-
-  setup_wifi();
-
-  client.setServer(mqtt_server, 1883);
-  client.setCallback(callback);
-
-  Udp.begin(localPort);
-  setSyncProvider(RTC.get);
+  strip.setBrightness(brightness);
+  digitalClockDisplay();
 }
 
-time_t prevDisplay = 0; // when the digital clock was displayed
-
 void loop() {
-  if (timeStatus() != timeNotSet) {
-    if (now() != prevDisplay) { //update the display only if time has changed
-      prevDisplay = now();
-      digitalClockDisplay();
-    }
-  }
-  if (!client.connected()) {
-    reconnect();
-  }
-  client.loop();
-/*
-  long now = millis();
-  if (now - lastMsg > 2000) {
-    lastMsg = now;
-    ++value;
-    snprintf (msg, 75, "hello world #%ld", value);
-    Serial.print("Publish message: ");
-    Serial.println(msg);
-    client.publish(logTopic, msg);
-  }
-  */
+  wifiStateManagement();
+  runClockLoop();
+  runMqttLoop();
+  toggleBrightnessWithButton();
 }
 
 void digitalClockDisplay(){
@@ -245,6 +358,7 @@ void digitalClockDisplay(){
   strip.setPixelColor(hoursPixel, p[HOUR]);
   strip.setPixelColor(minutes, p[MINUTE]);
   strip.setPixelColor(seconds, p[SECOND]);
+  if (displaySpeedy && enableSpeedy) strip.setPixelColor(speedy, 0xFF8800);
   strip.show();
 }
 
