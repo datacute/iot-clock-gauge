@@ -1,3 +1,5 @@
+#include <FS.h>                   //this needs to be first, or it all crashes and burns...
+
 #include <Wire.h>
 #include <DS3232RTC.h>    //http://github.com/JChristensen/DS3232RTC
 #include <Time.h>         //https://github.com/PaulStoffregen/Time
@@ -12,12 +14,20 @@
 #include <WiFiUdp.h>
 #include <PubSubClient.h>
 
-const char* ssid = "your network SSID (name)";  //  your network SSID (name)
-const char* password = "your network password";       // your network password
+//needed for library
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 
-const char* logTopic = "home/clock/log";
-const char* subscribeTopic = "home/clock/incoming"; // subscribe to this topic; anything sent here will be passed into the messageReceived function
-IPAddress mqtt_server(192,168,0,1); // your MQTT Server
+#include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
+
+//flag for saving data
+bool shouldSaveConfig = false;
+
+char logTopic[60] = "home/clock/log";
+char commandTopic[60] = "home/clock/command"; // subscribe to this topic; anything sent here will be passed into the messageReceived function
+char mqttServer[40] = "";
+char mqttPort[6] = "1883";
 String mqttClientName = "clock-"; // just a name used to talk to MQTT broker
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
@@ -27,9 +37,7 @@ char msg[50];
 int value = 0;
 
 // NTP Servers:
-IPAddress timeServer(132, 163, 4, 101); // time-a.timefreq.bldrdoc.gov
-// IPAddress timeServer(132, 163, 4, 102); // time-b.timefreq.bldrdoc.gov
-// IPAddress timeServer(132, 163, 4, 103); // time-c.timefreq.bldrdoc.gov
+char ntpServer[40] = "pool.ntp.org";
 
 const int timeZone = 13;     // NZDT
 //const int timeZone = 1;     // Central European Time
@@ -44,7 +52,7 @@ unsigned int localPort = 8888;  // local port to listen for UDP packets
 time_t getNtpTime();
 void digitalClockDisplay();
 uint8_t mod60(int8_t v);
-void sendNTPpacket(IPAddress &address);
+void sendNTPpacket(const char *address);
 
 #define PIN_BRIGHTNESS_BUTTON D8
 #define PIN_NEOPIXEL_RING D5
@@ -81,6 +89,93 @@ unsigned long timemslast;
 int speedy = 0;
 bool enableSpeedy = false;
 bool displaySpeedy = false;
+
+WiFiManager wifiManager;
+WiFiManagerParameter *custom_mqtt_server;
+WiFiManagerParameter *custom_mqtt_port;
+WiFiManagerParameter *custom_log_topic;
+WiFiManagerParameter *custom_command_topic;
+WiFiManagerParameter *custom_ntp_server;
+
+void configModeCallback (WiFiManager *myWiFiManager) {
+  Serial.println("Entered config mode");
+  Serial.println(WiFi.softAPIP());
+  //if you used auto generated SSID, print it
+  Serial.println(myWiFiManager->getConfigPortalSSID());
+}
+
+//callback notifying us of the need to save config
+void saveConfigCallback() {
+  Serial.println("Should save config");
+  shouldSaveConfig = true;
+}
+
+//callback notifying us of the need to save config
+void saveConfig() {
+  Serial.println("Saving config");
+
+  //read updated parameters
+  strcpy(mqttServer, custom_mqtt_server->getValue());
+  strcpy(mqttPort, custom_mqtt_port->getValue());
+  strcpy(logTopic, custom_log_topic->getValue());
+  strcpy(commandTopic, custom_command_topic->getValue());
+  strcpy(ntpServer, custom_ntp_server->getValue());
+
+  DynamicJsonBuffer jsonBuffer;
+  JsonObject& json = jsonBuffer.createObject();
+  json["mqtt_server"] = mqttServer;
+  json["mqtt_port"] = mqttPort;
+  json["log_topic"] = logTopic;
+  json["command_topic"] = commandTopic;
+  json["ntp_server"] = ntpServer;
+
+  File configFile = SPIFFS.open("/config.json", "w");
+  if (!configFile) {
+    Serial.println("failed to open config file for writing");
+  } else {
+    json.printTo(Serial);
+    Serial.println();
+    json.printTo(configFile);
+    configFile.close();
+  }
+  //end save
+  shouldSaveConfig = false;
+}
+
+void wifiManagerSetup() {
+  //reset settings - for testing
+  //wifiManager.resetSettings();
+
+  //set callback that gets called when connecting to previous WiFi fails, and enters Access Point mode
+  wifiManager.setAPCallback(configModeCallback);
+    
+  //set custom ip for portal
+  //wifiManager.setAPConfig(IPAddress(10,0,1,1), IPAddress(10,0,1,1), IPAddress(255,255,255,0));
+
+  //wifiManager.setRunServerAfterConnecting(true);
+
+  //set config save notify callback
+  wifiManager.setSaveConfigCallback(saveConfigCallback);
+
+  //add all your parameters here
+  wifiManager.addParameter(custom_mqtt_server);
+  wifiManager.addParameter(custom_mqtt_port);
+  wifiManager.addParameter(custom_log_topic);
+  wifiManager.addParameter(custom_command_topic);
+  wifiManager.addParameter(custom_ntp_server);
+
+  //fetches ssid and pass from eeprom and tries to connect
+  //if it does not connect it starts an access point with the specified name
+  //and goes into a blocking loop awaiting configuration
+  wifiManager.autoConnect("IoTClockConfig");
+  //or use this for auto generated name ESP + ChipID
+  //wifiManager.autoConnect();
+
+  //save the custom parameters to FS
+  if (shouldSaveConfig) {
+    saveConfig();
+  }
+}
 
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
@@ -129,11 +224,7 @@ wifiState wifiCurrentState = wifiOff;
 
 void wifiBegin() {
   wifiCurrentState = wifiBegun;
-  // We start by connecting to a WiFi network
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
+  wifiManagerSetup();
 }
 
 void wifiWaitForConnection() {
@@ -150,7 +241,7 @@ void wifiWaitForConnection() {
     //setTime(t);
   
     // Get ready for MQTT
-    mqttClient.setServer(mqtt_server, 1883);
+    mqttClient.setServer(mqttServer, 1883);
     mqttClient.setCallback(callback);
   }
 }
@@ -158,6 +249,12 @@ void wifiWaitForConnection() {
 void wifiMaintainConnection() {
   if (WiFi.status() != WL_CONNECTED) {
     wifiBegin();
+  } else {
+    //wifiManager.loop();
+    //save the custom parameters to FS
+    if (shouldSaveConfig) {
+      saveConfig();
+    }
   }
 }
 
@@ -184,7 +281,7 @@ int mqttState = 0;
 
 void mqttConnect() {
   Serial.print("Attempting MQTT connection to ");
-  Serial.print(mqtt_server);
+  Serial.print(mqttServer);
   Serial.print(" as ");
   Serial.println(mqttClientName);
   // this is still blocking, when a solution is found, mqttState of 1 will mean connecting.
@@ -193,9 +290,9 @@ void mqttConnect() {
     // Once connected, publish an announcement...
     mqttClient.publish(logTopic, mqttClientName.c_str());
     // ... and resubscribe
-    mqttClient.subscribe(subscribeTopic);
+    mqttClient.subscribe(commandTopic);
     Serial.print("Subscribed to: ");
-    Serial.println(subscribeTopic);
+    Serial.println(commandTopic);
     mqttState = 2;
   } else {
     Serial.print("failed, rc=");
@@ -318,6 +415,52 @@ void setup() {
   strip.show(); // Initialize all pixels to 'off'
   strip.setBrightness(brightness);
   digitalClockDisplay();
+
+  //read configuration from FS json
+  Serial.println("mounting FS...");
+
+  if (SPIFFS.begin()) {
+    Serial.println("Mounted file system");
+    if (SPIFFS.exists("/config.json")) {
+      //file exists, reading and loading
+      Serial.println("reading config file");
+      File configFile = SPIFFS.open("/config.json", "r");
+      if (configFile) {
+        Serial.println("opened config file");
+        size_t size = configFile.size();
+        // Allocate a buffer to store contents of the file.
+        std::unique_ptr<char[]> buf(new char[size]);
+
+        configFile.readBytes(buf.get(), size);
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject& json = jsonBuffer.parseObject(buf.get());
+        json.printTo(Serial);
+        Serial.println();
+        if (json.success()) {
+          Serial.println("parsed json");
+
+          if (json.containsKey("mqtt_server")) strcpy(mqttServer, json["mqtt_server"]);
+          if (json.containsKey("mqtt_port")) strcpy(mqttPort, json["mqtt_port"]);
+          if (json.containsKey("log_topic")) strcpy(logTopic, json["log_topic"]);
+          if (json.containsKey("command_topic")) strcpy(commandTopic, json["command_topic"]);
+          if (json.containsKey("ntp_server")) strcpy(ntpServer, json["ntp_server"]);
+
+        } else {
+          Serial.println("failed to load json config");
+        }
+      }
+    } else {
+      Serial.println("/config.json not found");
+    }
+  } else {
+    Serial.println("failed to mount FS");
+  }
+  //end read
+  custom_mqtt_server = new WiFiManagerParameter("server", "MQTT Server", mqttServer, 40);
+  custom_mqtt_port = new WiFiManagerParameter("port", "MQTT Port", mqttPort, 5);
+  custom_log_topic = new WiFiManagerParameter("log", "MQTT Log Topic", logTopic, 60);
+  custom_command_topic = new WiFiManagerParameter("command", "MQTT Command Topic", commandTopic, 60);
+  custom_ntp_server = new WiFiManagerParameter("ntp", "NTP Server", ntpServer, 40);
 }
 
 void loop() {
@@ -378,7 +521,7 @@ time_t getNtpTime()
 {
   while (Udp.parsePacket() > 0) ; // discard any previously received packets
   //Serial.println("Transmit NTP Request");
-  sendNTPpacket(timeServer);
+  sendNTPpacket(ntpServer);
   uint32_t beginWait = millis();
   while (millis() - beginWait < 1500) {
     int size = Udp.parsePacket();
@@ -399,7 +542,7 @@ time_t getNtpTime()
 }
 
 // send an NTP request to the time server at the given address
-void sendNTPpacket(IPAddress &address)
+void sendNTPpacket(const char *address)
 {
   // set all bytes in the buffer to 0
   memset(packetBuffer, 0, NTP_PACKET_SIZE);
