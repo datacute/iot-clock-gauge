@@ -42,7 +42,7 @@ int value = 0;
 char ntpServer[40] = "pool.ntp.org";
 
 //New Zealand Time Zone {abbrev, week, dow, month, hour, offset}
-TimeChangeRule myDST = {"NZDT", Last, Sun, Aug, 2, 13*60};    //Daylight Savings Time = UTC + 13 hours
+TimeChangeRule myDST = {"NZDT", Last, Sun, Sep, 2, 13*60};    //Daylight Savings Time = UTC + 13 hours
 TimeChangeRule mySTD = {"NZST", First, Sun, Apr, 3, 12*60};   //Standard Time = UTC + 12 hours
 Timezone myTZ(myDST, mySTD);
 
