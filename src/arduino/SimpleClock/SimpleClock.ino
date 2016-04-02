@@ -5,6 +5,8 @@
 #include <Time.h>         //https://github.com/PaulStoffregen/Time
 #include <TimeLib.h>      //https://github.com/PaulStoffregen/Time
 
+#include <Timezone.h>    //https://github.com/JChristensen/Timezone
+
 #include <Adafruit_NeoPixel.h>
 #ifdef __AVR__
   #include <avr/power.h>
@@ -39,13 +41,17 @@ int value = 0;
 // NTP Servers:
 char ntpServer[40] = "pool.ntp.org";
 
-const int timeZone = 13;     // NZDT
-//const int timeZone = 1;     // Central European Time
-//const int timeZone = -5;  // Eastern Standard Time (USA)
-//const int timeZone = -4;  // Eastern Daylight Time (USA)
-//const int timeZone = -8;  // Pacific Standard Time (USA)
-//const int timeZone = -7;  // Pacific Daylight Time (USA)
+//New Zealand Time Zone {abbrev, week, dow, month, hour, offset}
+TimeChangeRule myDST = {"NZDT", Last, Sun, Aug, 2, 13*60};    //Daylight Savings Time = UTC + 13 hours
+TimeChangeRule mySTD = {"NZST", First, Sun, Apr, 3, 12*60};   //Standard Time = UTC + 12 hours
+Timezone myTZ(myDST, mySTD);
 
+//If TimeChangeRules are already stored in EEPROM, comment out the three
+//lines above and uncomment the line below.
+//(This will be done after  the ability to configure tiem zones is added)
+//Timezone myTZ(100);       //assumes rules stored at EEPROM address 100
+
+TimeChangeRule *tcr;        //pointer to the time change rule, use to get TZ abbrev
 
 WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
@@ -54,8 +60,9 @@ void digitalClockDisplay();
 uint8_t mod60(int8_t v);
 void sendNTPpacket(const char *address);
 
-#define PIN_BRIGHTNESS_BUTTON D8
 #define PIN_NEOPIXEL_RING D5
+#define PIN_BRIGHTNESS_DOWN_BUTTON D6
+#define PIN_BRIGHTNESS_UP_BUTTON D7
 
 enum PaletteColour { QUARTER_TICK, FIVE_MINUTE_TICK, HOUR, HOUR1, HOUR2, MINUTE, MINUTE1, SECOND};
 
@@ -354,39 +361,46 @@ void runMqttLoop() {
   }
 }
 
-int lastButtonState = 0;
-int brightnessIncreasing = 0;
+int lastButtonUpState = 0;
+int lastButtonDownState = 0;
 
 void toggleBrightnessWithButton() {
-  int buttonState = digitalRead(PIN_BRIGHTNESS_BUTTON);
-  if (buttonState != lastButtonState)
+  int oldBrightness = brightness;
+
+  int buttonUpState = digitalRead(PIN_BRIGHTNESS_UP_BUTTON);
+  if (buttonUpState != lastButtonUpState)
   {
-    lastButtonState = buttonState;
-    if (buttonState == 1)
+    lastButtonUpState = buttonUpState;
+    if (buttonUpState == LOW)
     {
-      if (brightnessIncreasing)
-      {
-        if (brightness == 0) {
-          brightness = 1;
-        } else if (brightness == 128) {
-          brightness = 255;
-        } else if (brightness == 255) {
-          brightness = 128;
-          brightnessIncreasing = 0;
-        } else {
-          brightness = brightness << 1;
-        }
+      if (brightness == 0) {
+        brightness = 1;
+      } else if (brightness >= 128) {
+        brightness = 255;
+      } else {
+        brightness = brightness << 1;
+      }
+    }
+  }
+
+  int buttonDownState = digitalRead(PIN_BRIGHTNESS_DOWN_BUTTON);
+  if (buttonDownState != lastButtonDownState)
+  {
+    lastButtonDownState = buttonDownState;
+    if (buttonDownState == LOW)
+    {
+      if (brightness > 128) {
+        brightness = 128;
       } else {
         brightness = brightness >> 1;
-        if (brightness == 0) {
-          brightnessIncreasing = 1;
-        }
       }
-      Serial.println(brightness);
-      strip.setBrightness(brightness);
-      digitalClockDisplay();
     }
-  }  
+  }
+  if (oldBrightness != brightness) {
+    strip.setBrightness(brightness);
+    digitalClockDisplay();
+    mqttClient.publish(logTopic, "Brightness Adjusted");
+  }
 }
 
 void setup() {
@@ -399,7 +413,8 @@ void setup() {
   pinMode(BUILTIN_LED, OUTPUT);     // Initialize the BUILTIN_LED pin as an output
   digitalWrite(BUILTIN_LED, HIGH);  // Turn the LED off by making the voltage HIGH
 
-  pinMode(PIN_BRIGHTNESS_BUTTON, INPUT);
+  pinMode(PIN_BRIGHTNESS_UP_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_BRIGHTNESS_DOWN_BUTTON, INPUT_PULLUP);
 
   Serial.begin(115200);
 
@@ -471,10 +486,12 @@ void loop() {
 }
 
 void digitalClockDisplay(){
-  int hours = hour();
+  time_t utc = now();
+  time_t local = myTZ.toLocal(utc, &tcr);
+  int hours = hour(local);
   while (hours >= 12) hours -= 12;
-  int minutes = minute();
-  int seconds = second();
+  int minutes = minute(local);
+  int seconds = second(local);
   int hoursPixel = hours * 5 + minutes/12;
   
   uint32_t* p = palettes[currentPalette];
@@ -534,7 +551,7 @@ time_t getNtpTime()
       secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
       secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
       secsSince1900 |= (unsigned long)packetBuffer[43];
-      return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
+      return secsSince1900 - 2208988800UL; // + timeZone * SECS_PER_HOUR;
     }
   }
   //Serial.println("No NTP Response :-(");
